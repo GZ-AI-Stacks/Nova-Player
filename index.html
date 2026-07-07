@@ -2021,7 +2021,8 @@ renderSavedPlaylists();
   });
 })();
 
-// PWA: offline caching so the player works without internet once installed
+// Service Worker ohne Caching — nur damit Chrome ein echtes App-Icon anbietet
+// statt nur ein Lesezeichen. Speichert bewusst nichts zwischen.
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
     navigator.serviceWorker.register("sw.js").catch(() => {});
