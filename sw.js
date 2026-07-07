@@ -1,4 +1,4 @@
-const CACHE_NAME = "nova-player-v1";
+const CACHE_NAME = "nova-player-v2";
 const CORE_ASSETS = ["./", "./index.html", "./manifest.json", "./icon.svg", "./icon-maskable.svg"];
 
 self.addEventListener("install", (event) => {
@@ -17,17 +17,17 @@ self.addEventListener("activate", (event) => {
   self.clients.claim();
 });
 
+// network-first: always try to fetch the latest version first, only fall
+// back to the cached copy when offline — so updates show up immediately
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
   event.respondWith(
-    caches.match(event.request).then(
-      (cached) =>
-        cached ||
-        fetch(event.request).then((res) => {
-          const clone = res.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
-          return res;
-        }).catch(() => cached)
-    )
+    fetch(event.request)
+      .then((res) => {
+        const clone = res.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+        return res;
+      })
+      .catch(() => caches.match(event.request))
   );
 });
