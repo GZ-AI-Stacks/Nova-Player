@@ -655,6 +655,34 @@ canvas#rain {
   background: var(--panel-2);
 }
 
+.save-as-row {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--panel-2);
+}
+
+.save-as-row.open { display: flex; }
+
+.save-as-input {
+  flex: 1;
+  min-width: 0;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 7px 10px;
+}
+
+.save-as-input:focus {
+  outline: 2px solid var(--green);
+  outline-offset: -1px;
+}
+
 .saved-row {
   padding: 4px 10px 10px;
 }
@@ -1076,6 +1104,11 @@ canvas#rain {
         <button class="tag-btn" id="plSave">Speichern</button>
         <button class="tag-btn" id="plClear">Leeren</button>
       </div>
+    </div>
+    <div class="save-as-row" id="saveAsRow">
+      <input type="text" id="saveAsInput" class="save-as-input" placeholder="Name für diese Playlist…" maxlength="60" />
+      <button class="tag-btn on" id="saveAsConfirm">Speichern</button>
+      <button class="tag-btn" id="saveAsCancel">Abbrechen</button>
     </div>
     <div class="playlist-body" id="playlistBody">
     <ul class="plist" id="plist"></ul>
@@ -1876,12 +1909,35 @@ async function loadSavedPlaylist(pl) {
   if (playlist.length) playTrack(0);
 }
 
-document.getElementById("plSave").addEventListener("click", async () => {
+const saveAsRow = document.getElementById("saveAsRow");
+const saveAsInput = document.getElementById("saveAsInput");
+
+document.getElementById("plSave").addEventListener("click", () => {
   if (!playlist.length) return;
-  const name = window.prompt("Name für diese Playlist:");
-  if (!name) return;
+  saveAsRow.classList.add("open");
+  saveAsInput.value = "";
+  saveAsInput.focus();
+});
+
+document.getElementById("saveAsCancel").addEventListener("click", () => {
+  saveAsRow.classList.remove("open");
+});
+
+async function confirmSaveAs() {
+  const name = saveAsInput.value.trim();
+  if (!name) {
+    saveAsInput.focus();
+    return;
+  }
   await dbSavePlaylist(name, playlist.map((t) => t.dbId));
   renderSavedPlaylists();
+  saveAsRow.classList.remove("open");
+}
+
+document.getElementById("saveAsConfirm").addEventListener("click", confirmSaveAs);
+saveAsInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") confirmSaveAs();
+  if (e.key === "Escape") saveAsRow.classList.remove("open");
 });
 
 renderSavedPlaylists();
