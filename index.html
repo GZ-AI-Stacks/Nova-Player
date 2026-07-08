@@ -1238,11 +1238,11 @@ async function dbClearTracks() {
   });
 }
 
-async function dbSavePlaylist(name, trackIds) {
+async function dbSavePlaylist(name, tracks) {
   const db = await openDb();
   return new Promise((resolve, reject) => {
     const tx = db.transaction("playlists", "readwrite");
-    const req = tx.objectStore("playlists").put({ name, trackIds });
+    const req = tx.objectStore("playlists").put({ name, tracks });
     req.onsuccess = () => resolve();
     req.onerror = () => reject(req.error);
   });
@@ -1901,9 +1901,14 @@ async function loadSavedPlaylist(pl) {
   audioEl.pause();
   playlist.length = 0;
   currentIndex = -1;
-  pl.trackIds.forEach((id) => {
-    const rec = byId.get(id);
-    if (rec) playlist.push({ dbId: rec.id, name: rec.name, fmt: rec.fmt, url: URL.createObjectURL(rec.blob) });
+  const entries = pl.tracks || (pl.trackIds || []).map((id) => ({ dbId: id }));
+  entries.forEach((entry) => {
+    if (entry.dbId != null) {
+      const rec = byId.get(entry.dbId);
+      if (rec) playlist.push({ dbId: rec.id, name: rec.name, fmt: rec.fmt, url: URL.createObjectURL(rec.blob) });
+    } else if (entry.url) {
+      playlist.push({ dbId: null, name: entry.name, fmt: entry.fmt, url: entry.url });
+    }
   });
   renderPlaylist();
   if (playlist.length) playTrack(0);
@@ -1929,7 +1934,8 @@ async function confirmSaveAs() {
     saveAsInput.focus();
     return;
   }
-  await dbSavePlaylist(name, playlist.map((t) => t.dbId));
+  const tracks = playlist.map((t) => (t.dbId != null ? { dbId: t.dbId } : { url: t.url, name: t.name, fmt: t.fmt }));
+  await dbSavePlaylist(name, tracks);
   renderSavedPlaylists();
   saveAsRow.classList.remove("open");
 }
