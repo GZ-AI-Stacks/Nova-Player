@@ -574,7 +574,7 @@ canvas#rain {
 
 .plist li {
   display: grid;
-  grid-template-columns: 14px 22px 1fr auto auto 22px;
+  grid-template-columns: 14px 22px 1fr auto auto 22px 22px;
   align-items: center;
   gap: 10px;
   padding: 9px 10px;
@@ -635,6 +635,17 @@ canvas#rain {
   padding: 2px;
 }
 .plist li .remove:hover { color: var(--pink); }
+
+.plist li .del-lib {
+  background: none;
+  border: none;
+  color: var(--text-faint);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px;
+}
+.plist li .del-lib:hover { color: var(--pink); }
 
 .drop-zone {
   display: block;
@@ -734,6 +745,7 @@ canvas#rain {
 
 .saved-chip .load-name { cursor: pointer; }
 .saved-chip .load-name:hover { color: var(--green); }
+.saved-chip .rename-name:hover { color: var(--cyan); }
 .saved-chip .del-name:hover { color: var(--pink); }
 
 /* --- visualizer --- */
@@ -964,7 +976,7 @@ canvas#rain {
   .eq-preset { padding: 4px 8px; font-size: 9px; }
 
   .plist li {
-    grid-template-columns: 12px 18px 1fr auto 18px;
+    grid-template-columns: 12px 18px 1fr auto 18px 18px;
     gap: 6px;
     font-size: 12px;
   }
@@ -1218,6 +1230,16 @@ async function dbGetAllTracks() {
   });
 }
 
+async function dbDeleteTrack(id) {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("tracks", "readwrite");
+    const req = tx.objectStore("tracks").delete(id);
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+  });
+}
+
 async function dbSavePlaylist(name, tracks) {
   const db = await openDb();
   return new Promise((resolve, reject) => {
@@ -1235,6 +1257,24 @@ async function dbGetAllPlaylists() {
     const req = tx.objectStore("playlists").getAll();
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
+  });
+}
+
+async function dbRenamePlaylist(oldName, newName) {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction("playlists", "readwrite");
+    const store = tx.objectStore("playlists");
+    const getReq = store.get(oldName);
+    getReq.onsuccess = () => {
+      const rec = getReq.result;
+      if (rec) {
+        store.delete(oldName);
+        store.put({ name: newName, tracks: rec.tracks });
+      }
+    };
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
   });
 }
 
@@ -1269,15 +1309,22 @@ function renderPlaylist() {
       <span class="name">${track.name}</span>
       <span class="fmt-tag">${track.fmt}</span>
       <span class="dur">${track.durText || "--:--"}</span>
-      <button class="remove" title="Entfernen" aria-label="Titel entfernen">×</button>`;
+      <button class="del-lib"${track.dbId == null ? ' style="visibility:hidden"' : ""} title="Endgültig aus der Bibliothek löschen" aria-label="Aus Bibliothek löschen">🗑</button>
+      <button class="remove" title="Aus dieser Liste entfernen" aria-label="Titel entfernen">×</button>`;
     li.addEventListener("click", (e) => {
-      if (e.target.closest(".remove")) return;
+      if (e.target.closest(".remove") || e.target.closest(".del-lib")) return;
       playTrack(i);
     });
     li.querySelector(".remove").addEventListener("click", (e) => {
       e.stopPropagation();
       removeTrack(i);
     });
+    if (track.dbId != null) {
+      li.querySelector(".del-lib").addEventListener("click", (e) => {
+        e.stopPropagation();
+        deleteFromLibrary(track.dbId, i);
+      });
+    }
 
     li.addEventListener("dragstart", () => { dragFromIndex = i; li.style.opacity = "0.4"; });
     li.addEventListener("dragend", () => { li.style.opacity = ""; });
@@ -1324,6 +1371,20 @@ function removeTrack(i) {
     updateTrackMeta(null);
   }
   renderPlaylist();
+}
+
+async function deleteFromLibrary(dbId, i) {
+  const track = playlist[i];
+  if (!track) return;
+  const allPlaylists = await dbGetAllPlaylists();
+  const usedIn = allPlaylists
+    .filter((pl) => (pl.tracks || []).some((t) => t.dbId === dbId))
+    .map((pl) => pl.name);
+  let msg = `"${track.name}" endgültig aus der Bibliothek löschen?\nDie Datei ist danach in ALLEN Playlisten weg, die sie verwenden.`;
+  if (usedIn.length) msg += `\n\nWird auch verwendet in: ${usedIn.join(", ")}`;
+  if (!confirm(msg)) return;
+  await dbDeleteTrack(dbId);
+  removeTrack(i);
 }
 
 async function addFiles(files) {
@@ -1448,6 +1509,12 @@ dropZone.addEventListener("drop", (e) => {
     (f) => f.type.startsWith("audio/") || AUDIO_EXT.test(f.name)
   );
   if (files.length) addFiles(files);
+});
+
+// Verhindert, dass der Browser bei einem Drop außerhalb der Drop-Zone
+// zur Datei navigiert und seinen eigenen nativen Mediaplayer anzeigt.
+["dragover", "drop"].forEach((evt) => {
+  window.addEventListener(evt, (e) => e.preventDefault());
 });
 
 document.getElementById("plClear").addEventListener("click", () => {
@@ -1861,8 +1928,15 @@ async function renderSavedPlaylists() {
   saved.forEach((pl) => {
     const chip = document.createElement("div");
     chip.className = "saved-chip";
-    chip.innerHTML = `<span class="load-name">▶ ${pl.name}</span><button class="del-name" title="Löschen">×</button>`;
+    chip.innerHTML = `<span class="load-name">▶ ${pl.name}</span><button class="rename-name" title="Umbenennen">✎</button><button class="del-name" title="Löschen">×</button>`;
     chip.querySelector(".load-name").addEventListener("click", () => loadSavedPlaylist(pl));
+    chip.querySelector(".rename-name").addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const newName = prompt("Neuer Name für die Playlist:", pl.name);
+      if (!newName || !newName.trim() || newName.trim() === pl.name) return;
+      await dbRenamePlaylist(pl.name, newName.trim());
+      renderSavedPlaylists();
+    });
     chip.querySelector(".del-name").addEventListener("click", async (e) => {
       e.stopPropagation();
       const db = await openDb();
@@ -1978,15 +2052,31 @@ renderSavedPlaylists();
 })();
 
 // theme toggle button
+// Titelleiste (PWA-Fensterfarbe) an aktuellen Skin/Theme koppeln
+function syncTitlebarColor() {
+  const root = document.documentElement;
+  const accent = getComputedStyle(root).getPropertyValue("--green").trim();
+  if (!accent) return;
+  let meta = document.querySelector('meta[name="theme-color"]');
+  if (!meta) {
+    meta = document.createElement("meta");
+    meta.setAttribute("name", "theme-color");
+    document.head.appendChild(meta);
+  }
+  meta.setAttribute("content", accent);
+}
+
 (function () {
   const btn = document.getElementById("themeBtn");
   const root = document.documentElement;
   const prefersLight = window.matchMedia("(prefers-color-scheme: light)").matches;
   root.setAttribute("data-theme", prefersLight ? "light" : "dark");
+  syncTitlebarColor();
   btn.addEventListener("click", () => {
     const cur = root.getAttribute("data-theme");
     const next = cur === "dark" ? "light" : "dark";
     root.setAttribute("data-theme", next);
+    syncTitlebarColor();
   });
 })();
 
@@ -2001,6 +2091,7 @@ renderSavedPlaylists();
     dot.addEventListener("click", () => {
       root.setAttribute("data-skin", dot.dataset.skin);
       dots.forEach((d) => d.classList.toggle("on", d === dot));
+      syncTitlebarColor();
     });
   });
 })();
